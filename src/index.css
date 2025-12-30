@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  line-height: 1.5;
+  font-weight: 400;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --warna-utama: #4F46E5;
+  --warna-sekunder: #0EA5E9;
+}
+
+ .hc *, .hc .text-gray-900, .hc .text-gray-600, .hc .text-blue-600, .hc .text-purple-600 {
+   color: #000 !important;
+ }
+ .hc .bg-white { background-color: #fff !important; }
+ .hc .border { border-color: #000 !important; }
+ .hc .focus\:ring-2 { box-shadow: 0 0 0 3px #000 !important; }

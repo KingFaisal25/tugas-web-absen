@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registrasi - KampusApp</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/register.css">
+    <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Progress Indicator -->
+    <div class="progress-container" role="progressbar" aria-label="Progress pendaftaran" aria-valuemin="1" aria-valuemax="4" aria-valuenow="1">
+        <div class="progress-step active" data-step="1">
+            <div class="step-number">1</div>
+            <div class="step-label">Informasi Dasar</div>
+        </div>
+        <div class="progress-step" data-step="2">
+            <div class="step-number">2</div>
+            <div class="step-label">Informasi Tambahan</div>
+        </div>
+        <div class="progress-step" data-step="3">
+            <div class="step-number">3</div>
+            <div class="step-label">Persyaratan</div>
+        </div>
+        <div class="progress-step" data-step="4">
+            <div class="step-number">4</div>
+            <div class="step-label">Selesai</div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="register-container">
+        <!-- Header -->
+        <header class="register-header" role="banner">
+            <div class="brand-logo">
+                <i class='bx bxs-graduation'></i>
+                <h1>KampusApp</h1>
+            </div>
+            <p class="subtitle">Daftar untuk mengakses layanan kampus</p>
+        </header>
+
+        <!-- Registration Form -->
+        <main class="register-form-container" role="main">
+            <form id="registrationForm" class="registration-form" novalidate>
+                <!-- Step 1: Basic Information -->
+                <div class="form-step active" data-step="1">
+                    <h2 class="step-title">Informasi Dasar</h2>
+                    <p class="step-description">Masukkan informasi akun Anda</p>
+                    
+                    <div class="form-group">
+                        <label for="fullName" class="form-label">Nama Lengkap <span class="required" aria-label="wajib">*</span></label>
+                        <div class="input-wrapper">
+                            <i class='bx bx-user'></i>
+                            <input type="text" id="fullName" name="fullName" class="form-input" placeholder="Masukkan nama lengkap Anda" required aria-required="true" aria-describedby="fullNameError">
+                        </div>
+                        <span id="fullNameError" class="error-message" role="alert" aria-live="polite"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email" class="form-label">Email <span class="required" aria-label="wajib">*</span></label>
+                        <div class="input-wrapper">
+                            <i class='bx bx-envelope'></i>
+                            <input type="email" id="email" name="email" class="form-input" placeholder="contoh@email.com" required aria-required="true" aria-describedby="emailError">
+                            <div class="validation-loader hidden" aria-label="Memvalidasi email">
+                                <i class='bx bx-loader-alt bx-spin'></i>
+                            </div>
+                        </div>
+                        <span id="emailError" class="error-message" role="alert" aria-live="polite"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password" class="form-label">Password <span class="required" aria-label="wajib">*</span></label>
+                        <div class="input-wrapper">
+                            <i class='bx bx-lock-alt'></i>
+                            <input type="password" id="password" name="password" class="form-input" placeholder="Minimal 8 karakter" required aria-required="true" aria-describedby="passwordError passwordStrength">
+                            <button type="button" class="password-toggle" aria-label="Toggle password visibility" aria-controls="password">
+                                <i class='bx bx-hide'></i>
+                            </button>
+                        </div>
+                        <div id="passwordStrength" class="password-strength" aria-live="polite">
+                            <div class="strength-bar">
+                                <div class="strength-fill" data-strength="0"></div>
+                            </div>
+                            <span class="strength-text">Kekuatan password</span>
+                        </div>
+                        <span id="passwordError" class="error-message" role="alert"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="confirmPassword" class="form-label">Konfirmasi Password <span class="required" aria-label="wajib">*</span></label>
+                        <div class="input-wrapper">
+                            <i class='bx bx-lock-alt'></i>
+                            <input type="password" id="confirmPassword" name="confirmPassword" class="form-input" placeholder="Ulangi password" required aria-required="true" aria-describedby="confirmPasswordError">
+                            <button type="button" class="password-toggle" aria-label="Toggle confirm password visibility" aria-controls="confirmPassword">
+                                <i class='bx bx-hide'></i>
+                            </button>
+                        </div>
+                        <span id="confirmPasswordError" class="error-message" role="alert" aria-live="polite"></span>
+                    </div>
+                </div>
+
+                <!-- Step 2: Additional Information -->
+                <div class="form-step" data-step="2">
+                    <h2 class="step-title">Informasi Tambahan</h2>
+                    <p class="step-description">Lengkapi informasi tambahan Anda</p>
+                    
+                    <div class="form-group">
+                        <label for="birthDate" class="form-label">Tanggal Lahir</label>
+                        <div class="input-wrapper">
+                            <i class='bx bx-calendar'></i>
+                            <input type="date" id="birthDate" name="birthDate" class="form-input" aria-describedby="birthDateError">
+                        </div>
+                        <span id="birthDateError" class="error-message" role="alert" aria-live="polite"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Jenis Kelamin</label>
+                        <div class="radio-group" role="radiogroup" aria-labelledby="gender-label">
+                            <label class="radio-option">
+                                <input type="radio" name="gender" value="male" class="radio-input">
+                                <span class="radio-custom"></span>
+                                <span class="radio-label">Pria</span>
+                            </label>
+                            <label class="radio-option">
+                                <input type="radio" name="gender" value="female" class="radio-input">
+                                <span class="radio-custom"></span>
+                                <span class="radio-label">Wanita</span>
+                            </label>
+                            <label class="radio-option">
+                                <input type="radio" name="gender" value="other" class="radio-input">
+                                <span class="radio-custom"></span>
+                                <span class="radio-label">Lainnya</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="address" class="form-label">Alamat Lengkap</label>
+                        <textarea id="address" name="address" class="form-textarea" placeholder="Masukkan alamat lengkap Anda" rows="3" aria-describedby="addressError"></textarea>
+                        <span id="addressError" class="error-message" role="alert" aria-live="polite"></span>
+                    </div>
+                </div>
+
+                <!-- Step 3: Terms and Conditions -->
+                <div class="form-step" data-step="3">
+                    <h2 class="step-title">Persyaratan</h2>
+                    <p class="step-description">Setujui persyaratan untuk melanjutkan</p>
+                    
+                    <div class="checkbox-group">
+                        <label class="checkbox-option">
+                            <input type="checkbox" id="terms" name="terms" class="checkbox-input" required aria-required="true">
+                            <span class="checkbox-custom"></span>
+                            <span class="checkbox-label">Saya menyetujui <a href="#" class="link-text" target="_blank" rel="noopener noreferrer">Syarat & Ketentuan</a> <span class="required">*</span></span>
+                        </label>
+                        <span id="termsError" class="error-message" role="alert" aria-live="polite"></span>
+                        
+                        <label class="checkbox-option">
+                            <input type="checkbox" id="privacy" name="privacy" class="checkbox-input" required aria-required="true">
+                            <span class="checkbox-custom"></span>
+                            <span class="checkbox-label">Saya menyetujui <a href="#" class="link-text" target="_blank" rel="noopener noreferrer">Kebijakan Privasi</a> <span class="required">*</span></span>
+                        </label>
+                        <span id="privacyError" class="error-message" role="alert" aria-live="polite"></span>
+                    </div>
+                </div>
+
+                <!-- Step 4: Success -->
+                <div class="form-step" data-step="4">
+                    <div class="success-container">
+                        <div class="success-icon">
+                            <i class='bx bx-check-circle'></i>
+                        </div>
+                        <h2 class="success-title">Registrasi Berhasil!</h2>
+                        <p class="success-message">Akun Anda telah berhasil dibuat. Silakan login untuk melanjutkan.</p>
+                        <div class="success-actions">
+                            <button type="button" class="btn btn-primary" onclick="window.location.href='/'">Login Sekarang</button>
+                            <button type="button" class="btn btn-secondary" onclick="window.location.href='/dashboard'">Ke Dashboard</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation Buttons -->
+                <div class="form-navigation">
+                    <button type="button" class="btn btn-secondary prev-btn hidden" id="prevBtn" aria-label="Kembali ke step sebelumnya">
+                        <i class='bx bx-arrow-back'></i> Kembali
+                    </button>
+                    <button type="button" class="btn btn-primary next-btn" id="nextBtn" aria-label="Lanjut ke step berikutnya">
+                        Lanjutkan <i class='bx bx-arrow-forward'></i>
+                    </button>
+                    <button type="submit" class="btn btn-primary submit-btn hidden" id="submitBtn" aria-label="Submit registrasi">
+                        Daftar Sekarang <i class='bx bx-check'></i>
+                    </button>
+                </div>
+            </form>
+        </main>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay hidden" id="loadingOverlay" role="status" aria-live="polite">
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Memproses registrasi...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/register.js"></script>
+</body>
+</html>
