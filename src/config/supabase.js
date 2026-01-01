@@ -1,10 +1,13 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-// Prefer service role key on backend for server-side operations; fallback to anon key
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error('❌ SUPABASE_SERVICE_ROLE_KEY is required for setup');
+}
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 module.exports = supabase;

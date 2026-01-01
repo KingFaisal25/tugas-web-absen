@@ -24,6 +24,24 @@ class QRService {
     };
   }
 
+  decryptData(encryptedPayload, secret) {
+    try {
+      const iv = Buffer.from(encryptedPayload.iv, 'hex');
+      const tag = Buffer.from(encryptedPayload.tag, 'hex');
+      const encryptedText = Buffer.from(encryptedPayload.data, 'hex');
+      const key = crypto.createHash('sha256').update(secret).digest();
+      
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      
+      const decrypted = Buffer.concat([decipher.update(encryptedText), decipher.final()]);
+      return JSON.parse(decrypted.toString('utf8'));
+    } catch (error) {
+      console.error('Decryption failed:', error.message);
+      return null;
+    }
+  }
+
   async generateQR({ userId, type, data, courseId, settings = {} }) {
     await this.ensureBuckets();
 
@@ -86,7 +104,25 @@ class QRService {
       .order(sort, { ascending: order === 'asc' })
       .range(from, to);
     if (error) throw error;
-    return { items: data, total: count, page };
+
+    const secret = process.env.QR_SECRET || 'default-secret';
+    const items = data.map(item => {
+      let courseName = null;
+      if (item.encrypted_data) {
+        try {
+          const enc = JSON.parse(item.encrypted_data);
+          const decrypted = this.decryptData(enc, secret);
+          if (decrypted && decrypted.course && decrypted.course.name) {
+            courseName = decrypted.course.name;
+          }
+        } catch (e) {
+          // ignore parsing/decryption errors
+        }
+      }
+      return { ...item, course_name: courseName };
+    });
+
+    return { items, total: count, page };
   }
 
   async remove(id) {

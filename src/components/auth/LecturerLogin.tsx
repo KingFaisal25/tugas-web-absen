@@ -18,6 +18,7 @@ const LecturerLogin: React.FC<Props> = (_props) => {
   const { login } = useAuth()
   const navigate = useNavigate()
   const isValidEmail = (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
+  const isValidPassword = (val: string) => val.length >= 6
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -26,6 +27,12 @@ const LecturerLogin: React.FC<Props> = (_props) => {
 
     if (!isValidEmail(email)) {
       setError('Format email tidak valid')
+      setLoading(false)
+      return
+    }
+
+    if (!isValidPassword(password)) {
+      setError('Password harus minimal 6 karakter')
       setLoading(false)
       return
     }

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../config/supabase.ts'
 import { useAuth } from '../contexts/AuthContext'
-import { PlusIcon, QrCodeIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, QrCodeIcon, TrashIcon, BookOpenIcon, ClipboardDocumentCheckIcon, ArrowRightIcon, CheckCircleIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { QRCodeCanvas } from 'qrcode.react'
 import LecturerLayout from '../components/layout/LecturerLayout'
 
@@ -13,12 +13,12 @@ type QRItem = {
   created_at?: string
 }
 
-type TaskItem = {
+type AssignmentItem = {
   id: string
   title: string
   description?: string
-  deadline?: string
-  priority?: string
+  due_date?: string
+  status?: string
 }
 
 type AttendanceSessionItem = {
@@ -36,35 +36,34 @@ type AttendanceLogItem = {
   scanned_at?: string
   status?: string
 }
+
 const LecturerDashboard: React.FC = () => {
   const { user } = useAuth()
-  const [qrType, setQrType] = useState('class')
-  const [qrData, setQrData] = useState('')
-  const [qrSize, setQrSize] = useState<number>(500)
-  const [qrLoading, setQrLoading] = useState(false)
-  const [qrList, setQrList] = useState<QRItem[]>([])
+  
+  // Wizard State
+  const [wizardStep, setWizardStep] = useState(1) // 1: Course, 2: Assignment, 3: QR
+  const [assignmentTitle, setAssignmentTitle] = useState('')
+  const [assignmentDesc, setAssignmentDesc] = useState('')
+  const [assignmentDeadline, setAssignmentDeadline] = useState('')
+  const [isCreatingAssignment, setIsCreatingAssignment] = useState(false)
+  
+  // General State
   const [courses, setCourses] = useState<{ id: string; code: string; name: string }[]>([])
   const [selectedCourseId, setSelectedCourseId] = useState<string>('')
-  const [courseError, setCourseError] = useState<string | null>(null)
   const [activeSessionToken, setActiveSessionToken] = useState<string>('')
   const [sessions, setSessions] = useState<AttendanceSessionItem[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string>('')
   const [logs, setLogs] = useState<AttendanceLogItem[]>([])
-  const [taskLoading, setTaskLoading] = useState(false)
-  const [tasks, setTasks] = useState<TaskItem[]>([])
-  const [materials, setMaterials] = useState<{ name: string; url: string; created_at?: string }[]>([])
-  const [materialFile, setMaterialFile] = useState<File | null>(null)
-  const [taskTitle, setTaskTitle] = useState('')
-  const [taskDescription, setTaskDescription] = useState('')
-  const [taskDeadline, setTaskDeadline] = useState('')
-  const [taskPriority, setTaskPriority] = useState('normal')
-  const [otpMethod, setOtpMethod] = useState<'email' | 'sms'>('email')
-  const [otpCode, setOtpCode] = useState('')
-  const [otpStatus, setOtpStatus] = useState<string | null>(null)
-  const [otpExpiry, setOtpExpiry] = useState<string | null>(null)
-  const [otpRemaining, setOtpRemaining] = useState<number>(0)
+  const [assignments, setAssignments] = useState<AssignmentItem[]>([])
+  
+  // Legacy/Other State (kept for compatibility or future use)
+  const [qrType, setQrType] = useState('attendance')
+  const [qrData, setQrData] = useState('')
+  const [qrSize, setQrSize] = useState<number>(300)
+  const [qrLoading, setQrLoading] = useState(false)
 
-  const apiBase = useMemo(() => 'http://localhost:3000', [])
+  const apiBase = useMemo(() => import.meta.env.VITE_API_URL || 'http://localhost:3000', [])
+  
   const formatDate = (iso?: string) => {
     if (!iso) return '-'
     const d = new Date(iso)
@@ -76,29 +75,12 @@ const LecturerDashboard: React.FC = () => {
 
   useEffect(() => {
     if (!user) return
-    loadQRList()
-    loadTasks()
     loadCourses()
   }, [user])
 
   const getAccessToken = async () => {
     const { data } = await supabase.auth.getSession()
     return data.session?.access_token || null
-  }
-
-  const loadQRList = async () => {
-    if (!user) return
-    setQrLoading(true)
-    try {
-      const token = await getAccessToken()
-      const res = await fetch(`${apiBase}/api/qr/user/${user.id}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      })
-      const data = await res.json()
-      if (data?.items) setQrList(data.items)
-    } finally {
-      setQrLoading(false)
-    }
   }
 
   const loadCourses = async () => {
@@ -108,15 +90,15 @@ const LecturerDashboard: React.FC = () => {
       const data = await res.json()
       if (Array.isArray(data)) {
         setCourses(data)
-        if (data.length > 0) setSelectedCourseId(data[0].id)
+        // Don't auto-select in wizard mode, let user choose
       }
     } catch {}
   }
 
   const startSession = async () => {
     if (!user || !selectedCourseId) return
+    setQrLoading(true)
     try {
-      const expiresAt = new Date(Date.now() + 60 * 60000).toISOString()
       const res = await fetch(`${apiBase}/api/attendance/create-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -126,11 +108,40 @@ const LecturerDashboard: React.FC = () => {
       if (data?.session_token || data?.session?.session_token) {
         const token = data.session_token || data.session.session_token
         setActiveSessionToken(token)
-        setQrType('attendance')
-        setQrData(token)
-        loadSessions()
+        loadSessions() // Refresh stats
       }
-    } catch {}
+    } catch {
+      alert('Gagal membuat sesi')
+    } finally {
+      setQrLoading(false)
+    }
+  }
+
+  const createAssignment = async () => {
+    if (!user || !selectedCourseId || !assignmentTitle) return
+    setIsCreatingAssignment(true)
+    try {
+      const res = await fetch(`${apiBase}/api/assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          courseId: selectedCourseId,
+          title: assignmentTitle,
+          description: assignmentDesc,
+          deadline: assignmentDeadline,
+          createdBy: user.id
+        })
+      })
+      const data = await res.json()
+      if (!data.error) {
+        // Assignment created
+        loadAssignments()
+      }
+    } catch {
+      alert('Gagal membuat tugas')
+    } finally {
+      setIsCreatingAssignment(false)
+    }
   }
 
   const loadSessions = async () => {
@@ -141,43 +152,20 @@ const LecturerDashboard: React.FC = () => {
       const data = await res.json()
       if (Array.isArray(data)) {
         setSessions(data)
-        if (data.length > 0) setSelectedSessionId(data[0].id)
+        if (data.length > 0 && !selectedSessionId) setSelectedSessionId(data[0].id)
       }
     } catch {}
   }
 
-  const loadMaterials = async () => {
+  const loadAssignments = async () => {
     if (!selectedCourseId) return
     try {
-      const params = new URLSearchParams({ courseId: selectedCourseId })
-      const res = await fetch(`${apiBase}/api/materials/list?${params.toString()}`)
+      const res = await fetch(`${apiBase}/api/assignments?courseId=${selectedCourseId}`)
       const data = await res.json()
-      if (Array.isArray(data)) setMaterials(data as any)
+      if (Array.isArray(data)) setAssignments(data)
     } catch {}
   }
-
-  const uploadMaterial = async () => {
-    if (!materialFile || !selectedCourseId) return
-    try {
-      const token = await getAccessToken()
-      const form = new FormData()
-      form.append('file', materialFile)
-      form.append('courseId', selectedCourseId)
-      const res = await fetch(`${apiBase}/api/materials/upload`, {
-        method: 'POST',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: form
-      })
-      const data = await res.json()
-      if (!data?.error) {
-        setMaterialFile(null)
-        loadMaterials()
-      }
-    } catch {}
-  }
-
+  
   const loadLogs = async () => {
     if (!selectedSessionId) return
     try {
@@ -188,9 +176,16 @@ const LecturerDashboard: React.FC = () => {
     } catch {}
   }
 
-  useEffect(() => { loadSessions() }, [selectedCourseId])
-  useEffect(() => { loadMaterials() }, [selectedCourseId])
+  useEffect(() => { 
+    if (selectedCourseId) {
+      loadSessions()
+      loadAssignments()
+    }
+  }, [selectedCourseId])
+
   useEffect(() => { loadLogs() }, [selectedSessionId])
+  
+  // Real-time logs
   useEffect(() => {
     if (!selectedSessionId) return
     const channel = supabase
@@ -202,541 +197,271 @@ const LecturerDashboard: React.FC = () => {
     return () => { supabase.removeChannel(channel) }
   }, [selectedSessionId])
 
-  const exportCsv = () => {
-    const headers = ['id', 'student_id', 'session_id', 'status', 'scanned_at']
-    const rows = logs.map(l => [l.id, l.student_id, l.session_id, l.status || 'present', l.scanned_at || ''])
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `attendance_logs_${selectedSessionId || 'session'}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const generateQR = async () => {
-    if (!user || !qrData.trim()) return
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    if (!selectedCourseId || !uuidRegex.test(selectedCourseId)) {
-      setCourseError(!selectedCourseId ? 'Mata kuliah wajib dipilih' : 'Format ID mata kuliah tidak valid')
-      return
-    }
-    setCourseError(null)
-    setQrLoading(true)
-    try {
-      const token = await getAccessToken()
-      const res = await fetch(`${apiBase}/api/qr/generate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          type: 'class',
-          courseId: selectedCourseId,
-          data: qrData,
-          settings: { is_private: false, scan_limit: 1000, width: qrSize }
-        })
-      })
-      const created = await res.json()
-      if (!created?.error) {
-        setQrList([created, ...qrList])
-        setQrData('')
+  // Wizard Handlers
+  const handleWizardNext = async () => {
+    if (wizardStep === 1) {
+      if (!selectedCourseId) {
+        alert('Pilih mata kuliah terlebih dahulu')
+        return
       }
-    } finally {
-      setQrLoading(false)
-    }
-  }
-
-  const sendOtp = async () => {
-    if (!user) return
-    setOtpStatus(null)
-    try {
-      const token = await getAccessToken()
-      const res = await fetch(`${apiBase}/api/verify/send-otp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({ userId: user.id, method: otpMethod })
-      })
-      const d = await res.json()
-      if (d?.error) {
-        setOtpStatus(`Gagal kirim OTP: ${d.error}`)
-        setOtpExpiry(null)
-        setOtpRemaining(0)
-      } else {
-        setOtpStatus('OTP terkirim. Cek email/SMS Anda.')
-        if (d?.expiry) {
-          setOtpExpiry(d.expiry)
-        } else {
-          const fallback = new Date(Date.now() + 10 * 60000).toISOString()
-          setOtpExpiry(fallback)
-        }
-        setOtpCode('')
+      setWizardStep(2)
+    } else if (wizardStep === 2) {
+      if (assignmentTitle) {
+        await createAssignment()
       }
-    } catch (e: any) {
-      setOtpStatus(e.message || 'Gagal kirim OTP')
+      // Generate Session automatically when moving to Step 3
+      await startSession()
+      setWizardStep(3)
     }
   }
 
-  const verifyOtp = async () => {
-    if (!user || !otpCode.trim()) return
-    setOtpStatus(null)
-    try {
-      const token = await getAccessToken()
-      const res = await fetch(`${apiBase}/api/verify/otp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({ userId: user.id, otp: otpCode.trim() })
-      })
-      const d = await res.json()
-      if (d?.error) setOtpStatus(`Verifikasi gagal: ${d.error}`)
-      else {
-        setOtpStatus('Verifikasi OTP berhasil.')
-        setOtpExpiry(null)
-        setOtpRemaining(0)
-      }
-    } catch (e: any) {
-      setOtpStatus(e.message || 'Verifikasi OTP gagal')
-    }
+  const handleWizardBack = () => {
+    if (wizardStep > 1) setWizardStep(wizardStep - 1)
   }
-
-  useEffect(() => {
-    if (!otpExpiry) {
-      setOtpRemaining(0)
-      return
-    }
-    const update = () => {
-      const diff = new Date(otpExpiry).getTime() - Date.now()
-      setOtpRemaining(Math.max(0, Math.floor(diff / 1000)))
-      if (diff <= 0) {
-        setOtpStatus('Kode OTP kedaluwarsa. Silakan kirim ulang.')
-      }
-    }
-    update()
-    const id = setInterval(update, 1000)
-    return () => clearInterval(id)
-  }, [otpExpiry])
-
-  const deleteQR = async (id: string) => {
-    if (!user) return
-    setQrLoading(true)
-    try {
-      const token = await getAccessToken()
-      await fetch(`${apiBase}/api/qr/${id}`, {
-        method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      })
-      setQrList(qrList.filter(i => i.id !== id))
-    } finally {
-      setQrLoading(false)
-    }
-  }
-
-  const loadTasks = async () => {
-    if (!user) return
-    setTaskLoading(true)
-    try {
-      const res = await fetch(`${apiBase}/api/tasks?userId=${encodeURIComponent(user.id)}`)
-      const data = await res.json()
-      if (Array.isArray(data)) setTasks(data)
-    } finally {
-      setTaskLoading(false)
-    }
-  }
-
-  const addTask = async () => {
-    if (!user || !taskTitle.trim()) return
-    setTaskLoading(true)
-    try {
-      const res = await fetch(`${apiBase}/api/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          title: taskTitle,
-          description: taskDescription || null,
-          deadline: taskDeadline || null,
-          priority: taskPriority
-        })
-      })
-      const data = await res.json()
-      if (Array.isArray(data) && data.length > 0) {
-        setTasks([data[0], ...tasks])
-        setTaskTitle('')
-        setTaskDescription('')
-        setTaskDeadline('')
-        setTaskPriority('normal')
-      }
-    } finally {
-      setTaskLoading(false)
-    }
+  
+  const resetWizard = () => {
+    setWizardStep(1)
+    setAssignmentTitle('')
+    setAssignmentDesc('')
+    setAssignmentDeadline('')
+    setActiveSessionToken('')
   }
 
   return (
     <LecturerLayout title="Dashboard Dosen">
-      <div className="max-w-6xl mx-auto px-2 md:px-6 py-6 md:py-10">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Dashboard Dosen</h1>
-            <p className="text-gray-600">Kelola kelas, statistik kehadiran, materi, dan tugas</p>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Dashboard Dosen</h1>
+          <p className="mt-2 text-gray-600">Mulai sesi kelas, kelola tugas, dan pantau kehadiran mahasiswa.</p>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center space-x-4">
+            <div className="p-3 bg-blue-100 text-blue-600 rounded-full">
+              <BookOpenIcon className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-600">Total Kelas</p>
+              <p className="text-2xl font-bold text-gray-900">{courses.length}</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center space-x-4">
+             <div className="p-3 bg-green-100 text-green-600 rounded-full">
+              <ClipboardDocumentCheckIcon className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-600">Sesi Aktif</p>
+              <p className="text-2xl font-bold text-gray-900">{sessions.length}</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center space-x-4">
+             <div className="p-3 bg-purple-100 text-purple-600 rounded-full">
+              <QrCodeIcon className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-600">Total Kehadiran</p>
+              <p className="text-2xl font-bold text-gray-900">{logs.length}</p>
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-            <p className="text-sm text-gray-600">Jumlah Kelas</p>
-            <p className="text-2xl font-semibold text-primary">{courses.length}</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-            <p className="text-sm text-gray-600">Sesi Aktif/Minggu</p>
-            <p className="text-2xl font-semibold text-primary">{sessions.length}</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-            <p className="text-sm text-gray-600">Log Kehadiran</p>
-            <p className="text-2xl font-semibold text-primary">{logs.length}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Verifikasi MFA</h2>
-            </div>
-            <div className="p-6 space-y-4">
-              {otpStatus && <div className="p-3 rounded border text-sm">{otpStatus}</div>}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Metode</label>
-                  <select value={otpMethod} onChange={e => setOtpMethod(e.target.value as 'email' | 'sms')} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500">
-                    <option value="email">Email</option>
-                    <option value="sms">SMS</option>
-                  </select>
-                </div>
-                <div className="md:col-span-2 flex items-end">
-                  <button onClick={sendOtp} className="w-full inline-flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 focus:ring-2 focus:ring-gray-500">
-                    Kirim OTP
-                  </button>
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* Left Column: Wizard (Takes 2/3 width) */}
+          <div className="lg:col-span-2 space-y-8">
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+              <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
+                <h2 className="text-lg font-bold text-gray-900">Mulai Sesi Kelas Baru</h2>
+                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                  <span className={`flex items-center justify-center w-6 h-6 rounded-full ${wizardStep >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>1</span>
+                  <div className="w-4 h-0.5 bg-gray-300"></div>
+                  <span className={`flex items-center justify-center w-6 h-6 rounded-full ${wizardStep >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>2</span>
+                  <div className="w-4 h-0.5 bg-gray-300"></div>
+                  <span className={`flex items-center justify-center w-6 h-6 rounded-full ${wizardStep >= 3 ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>3</span>
                 </div>
               </div>
-              {otpExpiry && (
-                <div className="text-sm text-gray-700">
-                  <p>
-                    Waktu tersisa: {String(Math.floor(otpRemaining / 60)).padStart(2, '0')}:
-                    {String(otpRemaining % 60).padStart(2, '0')}
-                  </p>
-                </div>
-              )}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Kode OTP</label>
-                  <input value={otpCode} onChange={e => setOtpCode(e.target.value)} placeholder="Masukkan kode OTP" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500" />
-                </div>
-                <div className="flex items-end">
-                  <button onClick={verifyOtp} disabled={otpRemaining === 0 && !!otpExpiry} className="w-full inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500 disabled:opacity-60 disabled:cursor-not-allowed">
-                    Verifikasi
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Generator QR</h2>
-              <QrCodeIcon className="h-6 w-6 text-purple-600" />
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Mata Kuliah</label>
-                  <select value={selectedCourseId} onChange={e => setSelectedCourseId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                    <option value="">Pilih mata kuliah</option>
-                    {courses.map(c => <option key={c.id} value={c.id}>{c.code} - {c.name}</option>)}
-                  </select>
-                  {courseError && <p className="mt-1 text-sm text-red-600">{courseError}</p>}
-                </div>
-              <div className="flex items-end">
-                <button onClick={startSession} className="w-full inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500">
-                  Mulai
-                </button>
-              </div>
-            </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tipe</label>
-                <select value={qrType} onChange={e => setQrType(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                  <option value="attendance">Absensi</option>
-                  <option value="link">Tautan</option>
-                  <option value="text">Teks</option>
-                </select>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
-                <input value={qrData} onChange={e => setQrData(e.target.value)} placeholder="Masukkan data QR" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500" />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Ukuran (px)</label>
-                <input
-                  type="number"
-                  min={128}
-                  max={1024}
-                  value={qrSize}
-                  onChange={e => setQrSize(Math.max(128, Math.min(1024, Number(e.target.value) || 500)))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                />
-              </div>
-            </div>
-              <div className="flex justify-end">
-                <button onClick={generateQR} disabled={qrLoading} className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:ring-2 focus:ring-purple-500">
-                  <PlusIcon className="h-5 w-5" />
-                  Buat QR
-                </button>
-              </div>
-              {activeSessionToken && (
-                <div className="flex items-center gap-6">
-                  <div>
-                    <p className="text-sm text-gray-700 mb-2">QR Sesi Aktif (scan oleh mahasiswa):</p>
-                    <QRCodeCanvas value={activeSessionToken} size={160} />
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    <p>Token: {activeSessionToken}</p>
-                    <p>Format waktu: {new Date().toLocaleString('id-ID')}</p>
-                  </div>
-                </div>
-              )}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Daftar QR</h3>
-                <div className="space-y-3">
-                  {qrList.map(item => (
-                    <div key={item.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                      <div className="flex items-center gap-4">
-                        {item.image_url ? (
-                          <img src={item.image_url} alt="QR" className="h-16 w-16 rounded border" />
-                        ) : (
-                          <div className="h-16 w-16 rounded border bg-gray-100" />
-                        )}
-                        <div>
-                          <p className="font-medium text-gray-900">Tipe: {item.type}</p>
-                          <p className="text-sm text-gray-600">ID: {item.id}</p>
-                        </div>
-                      </div>
-                      <button onClick={() => deleteQR(item.id)} className="p-2 rounded bg-red-50 hover:bg-red-100">
-                        <TrashIcon className="h-5 w-5 text-red-600" />
+              
+              <div className="p-8">
+                {/* Step 1: Select Course */}
+                {wizardStep === 1 && (
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Pilih Mata Kuliah</label>
+                      <select 
+                        value={selectedCourseId} 
+                        onChange={e => setSelectedCourseId(e.target.value)} 
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                      >
+                        <option value="">-- Pilih Mata Kuliah --</option>
+                        {courses.map(c => <option key={c.id} value={c.id}>{c.code} - {c.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex justify-end">
+                      <button 
+                        onClick={handleWizardNext}
+                        disabled={!selectedCourseId}
+                        className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      >
+                        Lanjut
+                        <ArrowRightIcon className="w-5 h-5" />
                       </button>
                     </div>
-                  ))}
-                  {qrList.length === 0 && (
-                    <p className="text-sm text-gray-500">Belum ada QR. Buat QR pertama Anda.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+                  </div>
+                )}
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Notifikasi</h2>
-            </div>
-            <div className="p-6 space-y-3">
-              {tasks
-                .filter(t => t.deadline)
-                .sort((a, b) => new Date(a.deadline || '').getTime() - new Date(b.deadline || '').getTime())
-                .slice(0, 5)
-                .map(t => (
-                  <div key={t.id} className="p-3 border rounded-lg flex items-center justify-between">
+                {/* Step 2: Assignment */}
+                {wizardStep === 2 && (
+                  <div className="space-y-6">
+                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                      <p className="text-sm text-blue-800">Opsional: Buat tugas baru untuk sesi ini.</p>
+                    </div>
                     <div>
-                      <p className="font-medium">{t.title}</p>
-                      <p className="text-sm text-gray-600">Batas: {new Date(t.deadline || '').toLocaleString('id-ID')}</p>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Judul Tugas</label>
+                      <input 
+                        value={assignmentTitle} 
+                        onChange={e => setAssignmentTitle(e.target.value)}
+                        placeholder="Contoh: Tugas Pendahuluan Modul 1"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                      />
                     </div>
-                    <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">{t.priority || 'normal'}</span>
-                  </div>
-                ))}
-              {tasks.filter(t => t.deadline).length === 0 && <p className="text-sm text-gray-500">Tidak ada notifikasi tenggat waktu.</p>}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Manajemen Tugas</h2>
-              <PlusIcon className="h-6 w-6 text-blue-600" />
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Judul</label>
-                  <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="Judul tugas" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Batas Waktu</label>
-                  <input type="datetime-local" value={taskDeadline} onChange={e => setTaskDeadline(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Deskripsi</label>
-                  <input value={taskDescription} onChange={e => setTaskDescription(e.target.value)} placeholder="Deskripsi tugas" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Prioritas</label>
-                  <select value={taskPriority} onChange={e => setTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="low">Rendah</option>
-                    <option value="normal">Normal</option>
-                    <option value="high">Tinggi</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <button onClick={addTask} disabled={taskLoading} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-                  <PlusIcon className="h-5 w-5" />
-                  Tambah Tugas
-                </button>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Daftar Tugas</h3>
-                <div className="space-y-3">
-                  {tasks.map(item => (
-                    <div key={item.id} className="p-3 border border-gray-200 rounded-lg">
-                      <div className="flex items-center justify-between">
-                        <p className="font-medium text-gray-900">{item.title}</p>
-                        <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">{item.priority || 'normal'}</span>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Deskripsi</label>
+                      <textarea 
+                        value={assignmentDesc} 
+                        onChange={e => setAssignmentDesc(e.target.value)}
+                        placeholder="Deskripsi tugas..."
+                        rows={3}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Tenggat Waktu</label>
+                      <input 
+                        type="datetime-local"
+                        value={assignmentDeadline} 
+                        onChange={e => setAssignmentDeadline(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="flex justify-between items-center pt-4">
+                      <button onClick={handleWizardBack} className="text-gray-600 hover:text-gray-900 font-medium">
+                        Kembali
+                      </button>
+                      <div className="flex gap-3">
+                        <button 
+                          onClick={() => { setAssignmentTitle(''); handleWizardNext(); }}
+                          className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors"
+                        >
+                          Lewati
+                        </button>
+                        <button 
+                          onClick={handleWizardNext}
+                          disabled={isCreatingAssignment || (assignmentTitle && !assignmentDeadline)}
+                          className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all"
+                        >
+                          {isCreatingAssignment ? 'Menyimpan...' : (assignmentTitle ? 'Simpan & Buat QR' : 'Lanjut')}
+                          <ArrowRightIcon className="w-5 h-5" />
+                        </button>
                       </div>
-                      {item.description ? <p className="text-sm text-gray-600 mt-1">{item.description}</p> : null}
-                      {item.deadline ? <p className="text-xs text-gray-500 mt-1">Batas: {new Date(item.deadline).toLocaleString()}</p> : null}
                     </div>
-                  ))}
-                  {tasks.length === 0 && (
-                    <p className="text-sm text-gray-500">Belum ada tugas. Tambahkan tugas untuk mahasiswa.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Materi Perkuliahan</h2>
-              <button onClick={loadMaterials} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm">Refresh</button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
-                  <input onChange={e => setMaterialFile(e.target.files?.[0] || null)} type="file" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-                </div>
-                <div className="flex items-end">
-                  <button onClick={uploadMaterial} className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">Upload</button>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {materials.map(m => (
-                  <a key={m.name} href={m.url} target="_blank" rel="noreferrer" className="block p-3 border rounded-lg hover:bg-gray-50">
-                    <p className="font-medium text-gray-900">{m.name}</p>
-                    <p className="text-sm text-gray-600">{m.created_at ? formatDate(m.created_at) : '-'}</p>
-                  </a>
-                ))}
-                {materials.length === 0 && <p className="text-sm text-gray-500">Belum ada materi untuk mata kuliah terpilih.</p>}
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Sesi Absensi</h2>
-              <button onClick={loadSessions} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm">Refresh</button>
-            </div>
-            <div className="p-6 space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Sesi</label>
-                <select value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500">
-                  {sessions.map(s => <option key={s.id} value={s.id}>{s.id} • {formatDate(s.created_at)}</option>)}
-                </select>
-              </div>
-              <div className="text-sm text-gray-600">
-                <p>Jumlah sesi: {sessions.length}</p>
-                <p>Waktu mulai sesi terpilih: {formatDate(sessions.find(x => x.id === selectedSessionId)?.created_at)}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Log Kehadiran</h2>
-              <div className="flex items-center gap-2">
-                <button onClick={loadLogs} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm">Refresh</button>
-                <button onClick={exportCsv} className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 text-sm">Export CSV</button>
-              </div>
-            </div>
-            <div className="p-6">
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left border-b">
-                      <th className="py-2 pr-4">Mahasiswa</th>
-                      <th className="py-2 pr-4">Status</th>
-                      <th className="py-2 pr-4">Waktu</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {logs.map(l => (
-                      <tr key={l.id} className="border-b">
-                        <td className="py-2 pr-4">{l.student_id}</td>
-                        <td className="py-2 pr-4">{l.status || 'present'}</td>
-                        <td className="py-2 pr-4">{l.scanned_at ? formatDate(l.scanned_at) : '-'}</td>
-                      </tr>
-                    ))}
-                    {logs.length === 0 && (
-                      <tr><td colSpan={3} className="py-4 text-center text-gray-500">Belum ada log</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mt-4 text-sm text-gray-700">
-                <p>Total hadir: {logs.length}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-200">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Kalender Akademik</h2>
-          </div>
-          <div className="p-6 space-y-3">
-            <div className="space-y-2">
-              {tasks
-                .filter(t => t.deadline)
-                .sort((a, b) => new Date(a.deadline || '').getTime() - new Date(b.deadline || '').getTime())
-                .map(t => (
-                  <div key={t.id} className="p-3 border rounded-lg">
-                    <p className="font-medium text-gray-900">{t.title}</p>
-                    <p className="text-sm text-gray-600">Tenggat: {new Date(t.deadline || '').toLocaleString('id-ID')}</p>
                   </div>
-                ))}
-              {sessions.map(s => (
-                <div key={s.id} className="p-3 border rounded-lg">
-                  <p className="font-medium text-gray-900">Sesi {s.id}</p>
-                  <p className="text-sm text-gray-600">Dibuat: {formatDate(s.created_at)}</p>
-                </div>
-              ))}
-              {tasks.filter(t => t.deadline).length === 0 && sessions.length === 0 && (
-                <p className="text-sm text-gray-500">Belum ada event kalender.</p>
-              )}
+                )}
+
+                {/* Step 3: QR Display */}
+                {wizardStep === 3 && (
+                  <div className="text-center space-y-6">
+                    <div className="flex justify-center">
+                      <div className="p-6 bg-white border-2 border-gray-900 rounded-2xl shadow-xl">
+                        {qrLoading ? (
+                          <div className="w-64 h-64 flex items-center justify-center text-gray-400">Loading QR...</div>
+                        ) : activeSessionToken ? (
+                          <QRCodeCanvas value={activeSessionToken} size={256} />
+                        ) : (
+                          <div className="w-64 h-64 flex items-center justify-center text-red-400">Gagal memuat QR</div>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-900">Scan untuk Absensi</h3>
+                      <p className="text-gray-600 mt-2">Kode ini berlaku selama 60 menit.</p>
+                      <p className="text-xs text-gray-400 mt-1 font-mono">{activeSessionToken}</p>
+                    </div>
+                    <div className="flex justify-center pt-4">
+                      <button 
+                        onClick={resetWizard}
+                        className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-all shadow-lg"
+                      >
+                        <CheckCircleIcon className="w-5 h-5" />
+                        Selesai
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="flex gap-2">
-              <a href="/analytics/dosen" className="px-4 py-2 bg-secondary text-white rounded-lg">Sistem Penilaian</a>
-              <a href="#forum" className="px-4 py-2 bg-gray-800 text-white rounded-lg">Forum Diskusi</a>
+
+            {/* Recent Assignments List */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-bold text-gray-900">Tugas Terbaru</h3>
+              </div>
+              <div className="space-y-4">
+                {assignments.length === 0 ? (
+                  <p className="text-gray-500 text-center py-4">Belum ada tugas untuk mata kuliah ini.</p>
+                ) : (
+                  assignments.map(a => (
+                    <div key={a.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors">
+                      <div>
+                        <p className="font-semibold text-gray-900">{a.title}</p>
+                        <p className="text-sm text-gray-500">{a.due_date ? new Date(a.due_date).toLocaleString('id-ID') : 'Tanpa tenggat'}</p>
+                      </div>
+                      <span className="px-3 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium">
+                        {a.status || 'Active'}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
+
+          {/* Right Column: Attendance Logs (Takes 1/3 width) */}
+          <div className="space-y-8">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-6">Log Kehadiran Live</h3>
+              
+              <div className="mb-4">
+                 <select 
+                   value={selectedSessionId} 
+                   onChange={e => setSelectedSessionId(e.target.value)}
+                   className="w-full text-sm border-gray-300 rounded-lg"
+                 >
+                   <option value="">-- Pilih Sesi --</option>
+                   {sessions.map(s => <option key={s.id} value={s.id}>{formatDate(s.created_at)}</option>)}
+                 </select>
+              </div>
+
+              <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                {logs.length === 0 ? (
+                   <p className="text-gray-500 text-center py-4">Belum ada data kehadiran.</p>
+                ) : (
+                  logs.map(log => (
+                    <div key={log.id} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900">{log.student_id.substring(0, 8)}...</p>
+                        <p className="text-xs text-gray-500">{log.scanned_at ? new Date(log.scanned_at).toLocaleTimeString() : '-'}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
     </LecturerLayout>

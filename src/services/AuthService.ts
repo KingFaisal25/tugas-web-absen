@@ -24,9 +24,12 @@ export interface AuthResponse {
   error: string | null
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+
 class AuthService {
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     try {
+      // 1. Authenticate with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: credentials.email,
         password: credentials.password,
@@ -35,21 +38,68 @@ class AuthService {
       if (authError) throw authError
 
       if (authData.user) {
-        const res = await fetch(`http://localhost:3000/api/users/${authData.user.id}`)
-        const userData = await res.json()
-        if (userData?.error) throw new Error(userData.error)
+        // 2. Fetch User Profile from Backend or Supabase Fallback
+        // Use try-catch specifically for the fetch to distinguish network errors
+        let userData: User | { error: string } | null = null
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/users/${authData.user.id}`)
+          if (!res.ok) {
+            let errorText = res.statusText
+            try {
+              const errBody = await res.json()
+              if (errBody.error) errorText = errBody.error
+            } catch {}
+            throw new Error(`Failed to fetch user profile: ${res.status} ${errorText}`)
+          }
+          userData = await res.json()
+        } catch (fetchErr: any) {
+           console.error('Fetch profile from backend error:', fetchErr)
+           
+           // Fallback: Try fetching directly from Supabase if backend is unreachable
+           try {
+             console.log('Attempting fallback to direct Supabase query...')
+             const { data: profileData, error: profileError } = await supabase
+               .from('users')
+               .select('*')
+               .eq('id', authData.user.id)
+               .single()
+               
+             if (profileError) throw profileError
+             if (profileData) {
+               userData = profileData as User
+             } else {
+               throw new Error('User profile not found in Supabase')
+             }
+           } catch (fallbackErr: any) {
+             console.error('Fallback profile fetch error:', fallbackErr)
+             await supabase.auth.signOut()
+             return {
+               user: null,
+               session: null,
+               error: `Gagal menghubungi server: ${fetchErr.message}. Fallback error: ${fallbackErr.message}`
+             }
+           }
+        }
 
-        if ((userData as User).role !== credentials.role) {
+        if (userData && 'error' in userData) {
+           await supabase.auth.signOut()
+           throw new Error(userData.error)
+        }
+        
+        const user = userData as User
+
+        // 3. Verify Role
+        if (user.role !== credentials.role) {
           await supabase.auth.signOut()
           return {
             user: null,
             session: null,
-            error: 'Role tidak sesuai. Silakan login dengan role yang benar.'
+            error: `Role tidak sesuai. Akun ini terdaftar sebagai ${user.role}, bukan ${credentials.role}.`
           }
         }
 
         return {
-          user: userData as User,
+          user: user,
           session: authData.session,
           error: null
         }
@@ -58,17 +108,27 @@ class AuthService {
       return {
         user: null,
         session: null,
-        error: 'Login gagal'
+        error: 'Login gagal. User tidak ditemukan.'
       }
     } catch (error: any) {
+      console.error('Login process error:', error)
       const msg = String(error?.message || '').toLowerCase()
+      
       if (msg.includes('email logins are disabled')) {
         return {
           user: null,
           session: null,
-          error: 'Metode login Email dinonaktifkan di Supabase. Aktifkan Email Provider di Dashboard → Authentication → Providers, atau gunakan metode login alternatif.'
+          error: 'Metode login Email dinonaktifkan di Supabase. Hubungi administrator.'
         }
       }
+      if (msg.includes('invalid login credentials')) {
+         return {
+          user: null,
+          session: null,
+          error: 'Email atau password salah.'
+        }
+      }
+      
       return {
         user: null,
         session: null,
@@ -80,7 +140,7 @@ class AuthService {
   async register(credentials: RegisterCredentials): Promise<AuthResponse> {
     try {
       // Use backend to create auth user (auto-confirm dev) and DB profile
-      const apiRes = await fetch('http://localhost:3000/api/auth/register', {
+      const apiRes = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -92,26 +152,32 @@ class AuthService {
           nidn: credentials.nidn
         })
       })
+      
       const apiData = await apiRes.json()
+      
       if (apiData?.error) {
         const msg = String(apiData.error).toLowerCase()
         const isExisting =
           msg.includes('already') ||
           msg.includes('exists') ||
           msg.includes('registered') ||
-          msg.includes('user') && msg.includes('exists')
+          (msg.includes('user') && msg.includes('exists'))
+          
         if (!isExisting) throw new Error(apiData.error)
-        // Fallback: email sudah terdaftar -> lakukan login dan pastikan profile tersedia
+        
+        // Fallback: email already exists -> try login and ensure profile exists
         const { data: loginData, error: loginErr } = await supabase.auth.signInWithPassword({
           email: credentials.email,
           password: credentials.password,
         })
         if (loginErr) throw loginErr
+        
         const authUserId = loginData.user?.id
         if (!authUserId) throw new Error('User terdaftar tetapi tidak dapat mengambil user ID')
-        // Coba membuat profile jika belum ada (abaikan jika duplikat)
+        
+        // Try creating profile if missing (ignore duplicates)
         try {
-          await fetch('http://localhost:3000/api/users', {
+          await fetch(`${API_BASE_URL}/api/users`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -124,9 +190,11 @@ class AuthService {
             })
           })
         } catch {}
-        // Ambil profile
-        const profileRes = await fetch(`http://localhost:3000/api/users/${authUserId}`)
+        
+        // Fetch profile
+        const profileRes = await fetch(`${API_BASE_URL}/api/users/${authUserId}`)
         const userData = await profileRes.json()
+        
         return {
           user: userData as User,
           session: loginData.session,
@@ -144,9 +212,9 @@ class AuthService {
       // Fetch profile using auth user id
       const authUserId = loginData.user?.id
       if (!authUserId) throw new Error('Registrasi berhasil tetapi tidak dapat mengambil user ID')
-      const profileRes = await fetch(`http://localhost:3000/api/users/${authUserId}`)
+      
+      const profileRes = await fetch(`${API_BASE_URL}/api/users/${authUserId}`)
       const userData = await profileRes.json()
-      if (userData?.error) throw new Error(userData.error)
 
       return {
         user: userData as User,
@@ -157,7 +225,7 @@ class AuthService {
       return {
         user: null,
         session: null,
-        error: error.message || 'Terjadi kesalahan saat registrasi'
+        error: error.message || 'Gagal melakukan registrasi'
       }
     }
   }
@@ -188,11 +256,28 @@ class AuthService {
       
       if (!authUser) return null
 
-      const res = await fetch(`http://localhost:3000/api/users/${authUser.id}`)
-      const userData = await res.json()
-      if (userData?.error) return null
-
-      return userData as User
+      // Try fetching from backend first
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/users/${authUser.id}`)
+        if (!res.ok) throw new Error('Backend fetch failed')
+        const userData = await res.json()
+        if (userData?.error) throw new Error(userData.error)
+        return userData as User
+      } catch (backendError) {
+        console.warn('Backend unavailable, falling back to direct Supabase query for getCurrentUser', backendError)
+        // Fallback to direct Supabase query
+        const { data, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authUser.id)
+          .single()
+        
+        if (error || !data) {
+           console.error('Supabase fallback failed', error)
+           return null
+        }
+        return data as User
+      }
     } catch (error) {
       console.error('Get current user error:', error)
       return null

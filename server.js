@@ -135,13 +135,25 @@ app.post('/api/users', async (req, res) => {
 
 app.get('/api/users/:id', async (req, res) => {
   const { id } = req.params;
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', id)
-    .single();
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', id)
+      .single();
+      
+    if (error) {
+      console.error(`Error fetching user ${id}:`, error);
+      if (error.code === 'PGRST116') { // Row not found
+         return res.status(404).json({ error: 'User not found' });
+      }
+      return res.status(500).json({ error: error.message, details: error });
+    }
+    res.json(data);
+  } catch (err) {
+    console.error(`Unexpected error fetching user ${id}:`, err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
 });
 
 // --- COURSES (Minimal endpoint to enable attendance tests) ---
@@ -181,6 +193,37 @@ app.get('/api/attendance/logs', async (req, res) => {
     .select('*')
     .eq('session_id', sessionId)
     .order('scanned_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// --- ASSIGNMENTS ---
+app.get('/api/assignments', async (req, res) => {
+  const { courseId } = req.query;
+  if (!courseId) return res.status(400).json({ error: 'courseId required' });
+  
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('course_id', courseId)
+    .order('created_at', { ascending: false });
+    
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/api/assignments', async (req, res) => {
+  const { courseId, title, description, deadline, createdBy } = req.body;
+  
+  const { data, error } = await supabase.from('assignments').insert([{
+    course_id: courseId,
+    title,
+    description,
+    due_date: deadline,
+    created_by: createdBy,
+    status: 'published'
+  }]).select().single();
+  
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
@@ -341,6 +384,21 @@ app.delete('/api/qr/:id', requireAuth, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+app.get('/api/health', async (req, res) => {
+  try {
+    const { count, error } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    if (error) {
+      console.error('Health check failed:', error);
+      return res.status(503).json({ status: 'error', message: 'Database connection failed', details: error.message });
+    }
+    res.json({ status: 'ok', message: 'System operational' });
+  } catch (err) {
+    console.error('Health check exception:', err);
+    res.status(503).json({ status: 'error', message: 'System malfunction', details: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
