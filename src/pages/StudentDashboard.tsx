@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { supabase } from '../config/supabase'
+import { supabase } from '../config/supabase.ts'
 import StudentLayout from '../components/layout/StudentLayout'
 
 const StudentDashboard: React.FC = () => {

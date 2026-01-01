@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+const supabase = require('../config/supabase-backend');
 const crypto = require('crypto');
 
 class AttendanceService {

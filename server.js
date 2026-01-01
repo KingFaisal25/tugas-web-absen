@@ -14,7 +14,7 @@ try {
     async summarizeContent() { return 'AI Service unavailable.'; },
   };
 }
-const supabase = require('./src/config/supabase'); // Direct access for simple CRUD
+const supabase = require('./src/config/supabase-backend'); // Direct access for simple CRUD
 const { requireAuth } = require('./src/middleware/auth');
 const qrService = require('./src/services/QRService');
 const taskService = require('./src/services/TaskService');
@@ -224,6 +224,34 @@ app.post('/api/assignments', async (req, res) => {
     status: 'published'
   }]).select().single();
   
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// --- SUBMISSIONS & GRADING ---
+app.get('/api/assignments/submissions', async (req, res) => {
+  const { assignmentId } = req.query;
+  if (!assignmentId) return res.status(400).json({ error: 'assignmentId required' });
+
+  const { data, error } = await supabase
+    .from('assignment_submissions')
+    .select('*, users:student_id(full_name, npm)')
+    .eq('assignment_id', assignmentId);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/api/assignments/grade', async (req, res) => {
+  const { submissionId, score, feedback } = req.body;
+  
+  const { data, error } = await supabase
+    .from('assignment_submissions')
+    .update({ score, feedback, status: 'graded' })
+    .eq('id', submissionId)
+    .select()
+    .single();
+    
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });

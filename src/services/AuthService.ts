@@ -35,7 +35,16 @@ class AuthService {
         password: credentials.password,
       })
 
-      if (authError) throw authError
+      if (authError) {
+        console.error('Login process error:', authError)
+        if (authError.message.includes('Invalid login credentials')) {
+          throw new Error('Email atau password salah. Silakan periksa kembali.')
+        }
+        if (authError.message.includes('Email not confirmed')) {
+          throw new Error('Email belum diverifikasi. Silakan cek inbox email Anda.')
+        }
+        throw authError
+      }
 
       if (authData.user) {
         // 2. Fetch User Profile from Backend or Supabase Fallback
